@@ -1,0 +1,37 @@
+{
+  "@badge-info=;badges=premium/1;client-nonce=18c9eeea5eb7403482d3d124a1917dd2;color=#ff0000;display-name=corepointgaming;emotes=;first-msg=0;flags=;id=01181b30-7525-4390-b6d5-9b7978d6e5f6;mod=0;returning-chatter=0;room-id=1419775666;subscriber=0;tmi-sent-ts=1772198355316;turbo=0;user-id=1329504258;user-type= corepointgaming": {
+    "messages": 1,
+    "xp": 5,
+    "level": 1,
+    "points": 0,
+    "races_won": 0
+  },
+  "@badge-info=;badges=premium/1;client-nonce=556271a0d8f3442f8b61e78fc73c31a5;color=#ff0000;display-name=corepointgaming;emotes=;first-msg=0;flags=;id=6ba4a54a-ba7c-44ef-8a28-e2d42af57919;mod=0;returning-chatter=0;room-id=1419775666;subscriber=0;tmi-sent-ts=1772198469410;turbo=0;user-id=1329504258;user-type= corepointgaming": {
+    "messages": 1,
+    "xp": 5,
+    "level": 1,
+    "points": 0,
+    "races_won": 0
+  },
+  "stormone": {
+    "messages": 0,
+    "xp": 0,
+    "level": 1,
+    "points": 10,
+    "races_won": 1
+  },
+  "corepointgaming": {
+    "messages": 36,
+    "xp": 80,
+    "level": 2,
+    "points": 0,
+    "races_won": 0
+  },
+  "mega_kino": {
+    "messages": 3,
+    "xp": 15,
+    "level": 1,
+    "points": 0,
+    "races_won": 0
+  }
+}
