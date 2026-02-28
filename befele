@@ -9,3 +9,37 @@
 !debug
 !stopstream
 !startstream
+
+
+🏁 BASIS RENNEN
+Command
+Funktion
+!g
+Dem Rennen beitreten
+(Auto)
+Rennen startet automatisch
+(Auto)
+Join-Phase 60 Sekunden
+(Auto)
+KI wird hinzugefügt
+(Auto)
+Coins werden verteilt
+💰 COIN SYSTEM
+Command
+Funktion
+!coins
+Zeigt deine aktuellen Coins
+💎 Belohnungen
+🏆 Sieg → +50 Coins
+🏁 Teilnahme → +10 Coins
+Coins werden gespeichert (bleiben nach Neustart erhalten).
+🛒 SHOP SYSTEM
+Command
+Kosten
+Effekt
+!buy turbo
+30 Coins
++3 Geschwindigkeit
+!buy speed
+50 Coins
++1 Startgeschwindigkeit
