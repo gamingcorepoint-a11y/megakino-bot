@@ -1,45 +1,67 @@
-🎯 Jetzt funktionieren sauber:
-!startrace
-!stoprace
+🏁 RENN-SYSTEM – ALLE COMMANDS
+👥 USER COMMANDS (für Zuschauer)
+🚗 !g
+Dem aktuellen Rennen beitreten.
+⏳ !nextrennen
+Zeigt an, wann das nächste automatische Rennen startet.
+📊 !status
+Zeigt, ob das Rennsystem aktiv oder pausiert ist.
+🪙 !coins
+Zeigt deine aktuellen Coins.
+⚡ !buy turbo
+Kauft Turbo (30 Coins).
+🚀 !buy speed
+Kauft Geschwindigkeits-Boost (50 Coins).
+🛠 MOD / ADMIN COMMANDS
+(Funktionieren für Mods + Broadcaster)
+🟢 !start
+Aktiviert das komplette Rennsystem.
+🔴 !stop
+Deaktiviert das Rennsystem komplett.
+Kein Join möglich, kein Autostart.
+🚀 !startrace
+Startet sofort ein Rennen.
+🛑 !stoprace
+Stoppt das aktuelle Rennen.
+♻ !clearrace
+Setzt das Rennen zurück (Spieler werden gelöscht).
+⏱ !setinterval <sekunden>
+Setzt das Auto-Start-Intervall neu.
+Beispiel:
+Code kopieren
+
 !setinterval 120
-!forcejoin name
-!clearrace
-!winner
-!say text
-!debug
-!stopstream
-!startstream
+🏆 !winner
+Zeigt den letzten Gewinner an.
+🗣 !say <text>
+Lässt den Bot eine Nachricht schreiben.
+Beispiel:
+Code kopieren
 
+!say Willkommen im Stream!
+🐛 !debug
+Zeigt Systemstatus:
+Rennsystem an/aus
+Rennen läuft
+Join offen
+Anzahl Spieler
+💡 OPTIONAL (wenn du willst)
+Wenn du möchtest, kann ich dir noch einen Command machen:
+Code kopieren
 
-🏁 BASIS RENNEN
-Command
-Funktion
-!g
-Dem Rennen beitreten
-(Auto)
-Rennen startet automatisch
-(Auto)
-Join-Phase 60 Sekunden
-(Auto)
-KI wird hinzugefügt
-(Auto)
-Coins werden verteilt
-💰 COIN SYSTEM
-Command
-Funktion
-!coins
-Zeigt deine aktuellen Coins
-💎 Belohnungen
-🏆 Sieg → +50 Coins
-🏁 Teilnahme → +10 Coins
-Coins werden gespeichert (bleiben nach Neustart erhalten).
-🛒 SHOP SYSTEM
-Command
-Kosten
-Effekt
-!buy turbo
-30 Coins
-+3 Geschwindigkeit
-!buy speed
-50 Coins
-+1 Startgeschwindigkeit
+!commands
+Der dann im Chat automatisch diese Übersicht in Kurzform postet.
+📋 FERTIGER TEXT FÜR DEIN PANEL
+Wenn du es kompakt für Twitch reinpacken willst:
+Code kopieren
+
+🏁 Autorennen:
+!g = Join
+!coins = Coins anzeigen
+!buy turbo (30)
+!buy speed (50)
+!nextrennen = Countdown
+!status = Systemstatus
+
+Mods:
+!start !stop !startrace !stoprace !clearrace !setinterval X !winner !debug
