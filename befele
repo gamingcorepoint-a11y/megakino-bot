@@ -1,0 +1,11 @@
+🎯 Jetzt funktionieren sauber:
+!startrace
+!stoprace
+!setinterval 120
+!forcejoin name
+!clearrace
+!winner
+!say text
+!debug
+!stopstream
+!startstream
