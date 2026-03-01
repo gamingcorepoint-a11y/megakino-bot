@@ -1,0 +1,258 @@
+import asyncio
+import re
+
+from irc_client import IRCClient
+from config import CHANNEL
+import systems.race_system.race_system as race_system
+
+
+# ======================================
+# GLOBAL STATE
+# ======================================
+race_system_enabled = True
+maintenance_mode = False
+race_task = None
+
+
+# ======================================
+# PARSER
+# ======================================
+def parse_message(raw_line):
+    match = re.search(r":([^!]+)!.* PRIVMSG #[^ ]+ :(.*)", raw_line)
+    if not match:
+        return None, None
+    return match.group(1), match.group(2).strip()
+
+
+# ======================================
+# ADMIN CHECK (MODS + BROADCASTER)
+# ======================================
+def is_admin(raw_line, user):
+    rl = raw_line.lower()
+    ul = user.lower()
+
+    if "badges=broadcaster/1" in rl:
+        return True
+
+    if "badges=moderator/" in rl:
+        return True
+
+    if "mod=1" in rl:
+        return True
+
+    if ul == CHANNEL.lower():
+        return True
+
+    return False
+
+
+# ======================================
+# LOOP CONTROL
+# ======================================
+def start_race_loop(client):
+    global race_task
+    if race_task is None or race_task.done():
+        race_task = asyncio.create_task(
+            race_system.auto_race_loop(client.send)
+        )
+
+
+def stop_race_loop():
+    global race_task
+    if race_task and not race_task.done():
+        race_task.cancel()
+    race_task = None
+
+
+def hard_stop_race_state():
+    try:
+        race_system.race_running = False
+        race_system.race_join_open = False
+        race_system.players.clear()
+    except:
+        pass
+
+
+# ======================================
+# MESSAGE HANDLER
+# ======================================
+async def handle_message(raw_line, client):
+    global race_system_enabled, maintenance_mode
+
+    user, message = parse_message(raw_line)
+    if not user or not message:
+        return
+
+    msg_raw = message.strip()
+    msg = msg_raw.lower()
+    admin = is_admin(raw_line, user)
+
+    # ===============================
+    # STATUS
+    # ===============================
+    if msg == "!status":
+        if maintenance_mode:
+            await client.send("🛠 System im Wartungsmodus.")
+        else:
+            state = "🟢 AKTIV" if race_system_enabled else "🔴 PAUSIERT"
+            await client.send(f"🏁 Rennsystem {state}.")
+        return
+
+    # ===============================
+    # WARTUNG
+    # ===============================
+    if msg == "!wartung":
+        if not admin:
+            await client.send("❌ Keine Rechte.")
+            return
+
+        maintenance_mode = True
+        stop_race_loop()
+        hard_stop_race_state()
+        await client.send("🛠 Wartungsmodus aktiviert.")
+        return
+
+    if msg == "!wartungoff":
+        if not admin:
+            await client.send("❌ Keine Rechte.")
+            return
+
+        maintenance_mode = False
+        if race_system_enabled:
+            start_race_loop(client)
+        await client.send("🟢 Wartungsmodus deaktiviert.")
+        return
+
+    if msg == "!reload":
+        if not admin:
+            await client.send("❌ Keine Rechte.")
+            return
+
+        stop_race_loop()
+        hard_stop_race_state()
+
+        if race_system_enabled and not maintenance_mode:
+            start_race_loop(client)
+
+        await client.send("🔄 Rennsystem neu geladen.")
+        return
+
+    # ===============================
+    # BLOCK BEI WARTUNG
+    # ===============================
+    if maintenance_mode:
+        if msg.startswith("!"):
+            await client.send("🛠 System im Wartungsmodus.")
+        return
+
+    # ===============================
+    # START / STOP
+    # ===============================
+    if msg == "!stop":
+        if not admin:
+            await client.send("❌ Keine Rechte.")
+            return
+
+        race_system_enabled = False
+        stop_race_loop()
+        hard_stop_race_state()
+        await client.send("🛑 Rennsystem pausiert.")
+        return
+
+    if msg == "!start":
+        if not admin:
+            await client.send("❌ Keine Rechte.")
+            return
+
+        race_system_enabled = True
+        start_race_loop(client)
+        await client.send("🟢 Rennsystem aktiviert.")
+        return
+
+    if not race_system_enabled:
+        if msg.startswith("!"):
+            await client.send("🔴 Rennsystem pausiert.")
+        return
+
+    # ===============================
+    # JOIN
+    # ===============================
+    if msg == "!g":
+        await race_system.join_race(user, client.send)
+        return
+
+    # ===============================
+    # GAME COMMANDS
+    # ===============================
+    if hasattr(race_system, "handle_shop"):
+        handled = await race_system.handle_shop(user, msg_raw, client.send)
+        if handled:
+            return
+
+    # ===============================
+    # ADMIN EXTRA
+    # ===============================
+    if not admin:
+        return
+
+    if msg == "!startrace":
+        await race_system.start_race(client.send)
+        return
+
+    if msg == "!stoprace":
+        race_system.race_running = False
+        race_system.race_join_open = False
+        await client.send("🛑 Rennen gestoppt.")
+        return
+
+    if msg == "!clearrace":
+        hard_stop_race_state()
+        await client.send("♻ Rennen zurückgesetzt.")
+        return
+
+    if msg.startswith("!setinterval"):
+        parts = msg.split()
+        if len(parts) < 2 or not parts[1].isdigit():
+            await client.send("❌ Nutzung: !setinterval <sekunden>")
+            return
+
+        race_system.AUTO_RACE_INTERVAL = int(parts[1])
+        await client.send("⏱ Intervall geändert.")
+        return
+
+    if msg == "!winner":
+        if race_system.last_winner:
+            await client.send(f"🏆 Letzter Gewinner: {race_system.last_winner}")
+        else:
+            await client.send("Noch kein Gewinner.")
+        return
+
+    if msg.startswith("!say "):
+        await client.send(msg_raw[5:].strip())
+        return
+
+    if msg == "!debug":
+        await client.send(
+            f"DEBUG | enabled={race_system_enabled} | maintenance={maintenance_mode} | "
+            f"running={race_system.race_running}"
+        )
+        return
+
+
+# ======================================
+# MAIN
+# ======================================
+async def main():
+    client = IRCClient()
+    await client.connect()
+
+    print("✅ Bot verbunden")
+
+    if race_system_enabled and not maintenance_mode:
+        start_race_loop(client)
+
+    await client.listen(lambda line: handle_message(line, client))
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
