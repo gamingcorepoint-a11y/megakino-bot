@@ -1,0 +1,739 @@
+import asyncio
+import random
+import time
+import json
+import os
+
+# ==========================================
+# CONFIG
+# ==========================================
+
+AUTO_RACE_INTERVAL = 60          # Autostart-Countdown (Sekunden)
+JOIN_DURATION = 60               # Join-Zeit (Sekunden)
+TOTAL_LAPS = 5                   # 5 Runden
+LAP_DURATION = 30                # 30 Sekunden pro Runde
+TICK_SECONDS = 5                 # Renn-Update alle 5 Sekunden (6 Ticks pro Runde)
+
+TICKS_PER_LAP = max(1, LAP_DURATION // TICK_SECONDS)
+TRACK_LENGTH = 100               # "Streckenlänge" pro Runde (virtuell)
+
+# Coins / Rewards
+COINS_WIN = 50
+COINS_PARTICIPATE = 10
+SEASON_POINTS_WIN = 25
+SEASON_POINTS_PARTICIPATE = 5
+
+# "Unlocks" (Coins werden NICHT abgezogen, man braucht nur mindestens X Coins)
+UNLOCKS = {
+    "turbo": 30,     # !buy turbo  -> dauerhaftes Turbo-Feature im Rennen (per Action)
+    "speed": 50,     # !buy speed  -> Start-Speed +1 (für dieses Rennen)
+    "boost": 20,     # !boost      -> +2 Speed für kurze Zeit
+    "attack": 40,    # !attack X   -> Gegner debuff
+    "risk": 0,       # !risk n     -> Bonus bei Sieg, keine Verluste
+}
+
+AI_NAMES = [
+    "MaxRacer", "ShadowX", "LucaSpeed",
+    "NightWolf", "NeoDrive", "BlazeKing",
+    "FastFinn", "DarkRider", "ViperX"
+]
+
+FEATURE_REMINDER_TEXT = (
+    "🏁 Autorennen: !g Join | !coins | !buy turbo (30) | !buy speed (50) | "
+    "!boost (20) | !attack NAME (40) | !risk 20 | !top | !season | !help"
+)
+
+# ==========================================
+# DATA STORAGE
+# ==========================================
+
+DATA_DIR = "data"
+DATA_FILE = os.path.join(DATA_DIR, "race_data.json")
+
+DEFAULT_DATA = {
+    "users": {},  # user -> {coins,wins,races,season_points,season_wins,season_races,unlocks:{...}}
+    "season_start": 0
+}
+
+def _ensure_data():
+    if not os.path.exists(DATA_DIR):
+        os.makedirs(DATA_DIR, exist_ok=True)
+    if not os.path.exists(DATA_FILE):
+        with open(DATA_FILE, "w", encoding="utf-8") as f:
+            json.dump(DEFAULT_DATA, f, indent=2)
+
+def _load_data():
+    _ensure_data()
+    try:
+        with open(DATA_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except:
+        return json.loads(json.dumps(DEFAULT_DATA))
+
+def _save_data(data):
+    _ensure_data()
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+
+def _season_reset_if_needed(data):
+    """Reset Season alle 30 Tage."""
+    now = int(time.time())
+    if not data.get("season_start"):
+        data["season_start"] = now
+        return data
+
+    THIRTY_DAYS = 30 * 24 * 60 * 60
+    if now - int(data["season_start"]) >= THIRTY_DAYS:
+        # reset season stats
+        for u, info in data["users"].items():
+            info["season_points"] = 0
+            info["season_wins"] = 0
+            info["season_races"] = 0
+        data["season_start"] = now
+    return data
+
+def _get_user(data, username):
+    key = username.lower()
+    if key not in data["users"]:
+        data["users"][key] = {
+            "coins": 0,
+            "wins": 0,
+            "races": 0,
+            "season_points": 0,
+            "season_wins": 0,
+            "season_races": 0,
+            "unlocks": {
+                "turbo": False,
+                "speed": False,
+                "boost": False,
+                "attack": False
+            }
+        }
+    return data["users"][key]
+
+def add_coins(username, amount):
+    data = _load_data()
+    data = _season_reset_if_needed(data)
+    u = _get_user(data, username)
+    u["coins"] += int(amount)
+    _save_data(data)
+
+def get_coins(username):
+    data = _load_data()
+    data = _season_reset_if_needed(data)
+    u = _get_user(data, username)
+    _save_data(data)
+    return int(u["coins"])
+
+def add_win(username):
+    data = _load_data()
+    data = _season_reset_if_needed(data)
+    u = _get_user(data, username)
+    u["wins"] += 1
+    u["season_wins"] += 1
+    _save_data(data)
+
+def add_race_played(username):
+    data = _load_data()
+    data = _season_reset_if_needed(data)
+    u = _get_user(data, username)
+    u["races"] += 1
+    u["season_races"] += 1
+    _save_data(data)
+
+def add_season_points(username, pts):
+    data = _load_data()
+    data = _season_reset_if_needed(data)
+    u = _get_user(data, username)
+    u["season_points"] += int(pts)
+    _save_data(data)
+
+def unlock_feature(username, feature):
+    data = _load_data()
+    data = _season_reset_if_needed(data)
+    u = _get_user(data, username)
+    if feature in u["unlocks"]:
+        u["unlocks"][feature] = True
+    _save_data(data)
+
+def has_unlock(username, feature):
+    data = _load_data()
+    data = _season_reset_if_needed(data)
+    u = _get_user(data, username)
+    _save_data(data)
+    return bool(u["unlocks"].get(feature, False))
+
+# ==========================================
+# RACE STATE
+# ==========================================
+
+players = {}           # key -> dict
+race_running = False
+race_join_open = False
+last_winner = None
+
+# Autostart helper
+_next_race_ts = 0
+_reminder_task_started = False
+
+# Events state
+_weather = "clear"     # clear / rain / sun / storm
+_safetycar_ticks = 0   # wenn >0: safety car aktiv
+_last_event_ts = 0
+
+# Per-race action limits
+_per_race_actions = {}  # user -> {"boost": bool, "attack": int, "risk": int, "speed_boost_used": bool}
+
+# ==========================================
+# HELPERS
+# ==========================================
+
+def _now():
+    return int(time.time())
+
+def _format_time(seconds: int) -> str:
+    if seconds < 0:
+        seconds = 0
+    m = seconds // 60
+    s = seconds % 60
+    if m > 0:
+        return f"{m}m {s}s"
+    return f"{s}s"
+
+def _is_in_race(user):
+    return user.lower() in players
+
+def _ensure_action_state(user):
+    k = user.lower()
+    if k not in _per_race_actions:
+        _per_race_actions[k] = {"boost": False, "attack": 0, "risk": 0, "speed_boost_used": False}
+    return _per_race_actions[k]
+
+def _eligible_unlock(user, feature):
+    """Coins werden NICHT abgezogen: du brauchst nur mindestens X Coins."""
+    need = UNLOCKS.get(feature, 0)
+    return get_coins(user) >= need
+
+def _pick_ai_name():
+    base = random.choice(AI_NAMES)
+    return f"{base}_{random.randint(1,99)}"
+
+def _leaderboard_top(data, key, limit=5):
+    items = []
+    for uname, info in data["users"].items():
+        items.append((uname, int(info.get(key, 0))))
+    items.sort(key=lambda x: x[1], reverse=True)
+    return items[:limit]
+
+# ==========================================
+# JOIN
+# ==========================================
+
+async def join_race(user, send_chat):
+    global race_join_open, race_running
+
+    uname = user
+    key = user.lower()
+
+    if race_running:
+        await send_chat(f"❌ @{uname} Das Rennen läuft bereits! Warte auf das nächste Rennen.")
+        return
+
+    if not race_join_open:
+        await send_chat(f"⏳ @{uname} Momentan kein Join möglich. Warte auf die Join-Phase.")
+        return
+
+    if key in players:
+        await send_chat(f"⚠ @{uname} Du bist bereits im Rennen!")
+        return
+
+    # Base speed
+    base_speed = random.randint(1, 3)
+
+    players[key] = {
+        "name": uname,
+        "is_ai": False,
+        "lap": 0,
+        "pos": 0,
+        "speed": base_speed,
+        "stunned_ticks": 0,   # Crash -> 1-2 Ticks aussetzen
+    }
+
+    _ensure_action_state(uname)
+
+    await send_chat(f"🏎 @{uname} ist dem Rennen beigetreten! (Speed {base_speed})")
+
+# ==========================================
+# COMMAND HANDLER (Coins/Shop/Actions/Top/Help)
+# main.py sollte das aufrufen (wie bei deinem handle_shop)
+# ==========================================
+
+async def handle_shop(user, message, send_chat):
+    """
+    Erweiterter Command-Handler:
+    - gibt True zurück, wenn Command behandelt wurde
+    - gibt False zurück, wenn nicht relevant
+    """
+
+    msg = message.strip().lower()
+    uname = user
+
+    # HELP
+    if msg == "!help":
+        await send_chat("ℹ Commands: !g | !coins | !buy turbo/speed | !boost | !attack NAME | !risk 20 | !top | !season | !nextrennen | !status")
+        return True
+
+    # COINS
+    if msg == "!coins":
+        c = get_coins(uname)
+        await send_chat(f"💰 @{uname} hat {c} Coins.")
+        return True
+
+    # BUY (Unlocks / per-race effects)
+    if msg.startswith("!buy"):
+        parts = msg.split()
+        if len(parts) < 2:
+            await send_chat(f"❌ @{uname} Nutzung: !buy turbo | !buy speed")
+            return True
+
+        item = parts[1]
+
+        if item not in ("turbo", "speed"):
+            await send_chat(f"❌ @{uname} Unbekannt: {item}. Nutze !buy turbo oder !buy speed.")
+            return True
+
+        if not _eligible_unlock(uname, item):
+            await send_chat(f"❌ @{uname} Du brauchst mindestens {UNLOCKS[item]} Coins für {item}. (Coins werden nicht abgezogen)")
+            return True
+
+        if item == "turbo":
+            unlock_feature(uname, "turbo")
+            await send_chat(f"✅ @{uname} Turbo freigeschaltet! (Du kannst im Rennen !boost nutzen / Turbo-Events werden stärker)")
+            return True
+
+        if item == "speed":
+            unlock_feature(uname, "speed")
+            await send_chat(f"✅ @{uname} Speed freigeschaltet! (Im nächsten Rennen bekommst du +1 Start-Speed automatisch)")
+            return True
+
+    # BOOST
+    if msg == "!boost":
+        if not race_running:
+            await send_chat(f"❌ @{uname} Boost geht nur während eines Rennens.")
+            return True
+
+        if not _is_in_race(uname):
+            await send_chat(f"❌ @{uname} Du bist nicht im Rennen. Tippe !g in der Join-Phase.")
+            return True
+
+        if not _eligible_unlock(uname, "boost"):
+            await send_chat(f"❌ @{uname} Du brauchst mindestens {UNLOCKS['boost']} Coins für Boost. (Coins werden nicht abgezogen)")
+            return True
+
+        state = _ensure_action_state(uname)
+        if state["boost"]:
+            await send_chat(f"⚠ @{uname} Boost hast du dieses Rennen schon benutzt!")
+            return True
+
+        state["boost"] = True
+        players[uname.lower()]["speed"] += 2
+        await send_chat(f"⚡ @{uname} aktiviert BOOST! (+2 Speed)")
+        return True
+
+    # ATTACK
+    if msg.startswith("!attack"):
+        if not race_running:
+            await send_chat(f"❌ @{uname} Attack geht nur während eines Rennens.")
+            return True
+
+        parts = message.strip().split(maxsplit=1)
+        if len(parts) < 2:
+            await send_chat(f"❌ @{uname} Nutzung: !attack NAME")
+            return True
+
+        target = parts[1].strip().lstrip("@")
+        if not target:
+            await send_chat(f"❌ @{uname} Nutzung: !attack NAME")
+            return True
+
+        if not _is_in_race(uname):
+            await send_chat(f"❌ @{uname} Du bist nicht im Rennen.")
+            return True
+
+        if not _is_in_race(target):
+            await send_chat(f"❌ @{uname} Ziel '{target}' ist nicht im Rennen.")
+            return True
+
+        if uname.lower() == target.lower():
+            await send_chat(f"❌ @{uname} Du kannst dich nicht selbst attacken 😄")
+            return True
+
+        if not _eligible_unlock(uname, "attack"):
+            await send_chat(f"❌ @{uname} Du brauchst mindestens {UNLOCKS['attack']} Coins für Attack. (Coins werden nicht abgezogen)")
+            return True
+
+        state = _ensure_action_state(uname)
+        if state["attack"] >= 2:
+            await send_chat(f"⚠ @{uname} Du hast deine Attack-Limits für dieses Rennen erreicht (max 2).")
+            return True
+
+        state["attack"] += 1
+
+        # Attack effect: target -1 speed oder stun
+        t = players[target.lower()]
+        if random.random() < 0.2:
+            # backfire -> attacker slow
+            players[uname.lower()]["speed"] = max(1, players[uname.lower()]["speed"] - 1)
+            await send_chat(f"💥 @{uname} ATTACK backfire! @{uname} verliert 1 Speed.")
+        else:
+            if random.random() < 0.25:
+                t["stunned_ticks"] = max(t["stunned_ticks"], 1)
+                await send_chat(f"🧨 @{uname} sabotiert {t['name']}! (1 Tick aussetzen)")
+            else:
+                t["speed"] = max(1, t["speed"] - 1)
+                await send_chat(f"🛠 @{uname} greift {t['name']} an! {t['name']} verliert 1 Speed.")
+        return True
+
+    # RISK (kein Verlust, nur Bonus wenn gewinnt)
+    if msg.startswith("!risk"):
+        if not race_running:
+            await send_chat(f"❌ @{uname} Risk geht nur während eines Rennens.")
+            return True
+
+        if not _is_in_race(uname):
+            await send_chat(f"❌ @{uname} Du bist nicht im Rennen.")
+            return True
+
+        parts = msg.split()
+        if len(parts) < 2 or not parts[1].isdigit():
+            await send_chat(f"❌ @{uname} Nutzung: !risk 20 (Bonus bei Sieg, keine Verluste)")
+            return True
+
+        amount = int(parts[1])
+        if amount <= 0:
+            await send_chat(f"❌ @{uname} Risk muss > 0 sein.")
+            return True
+
+        # optional: require coins >= amount (aber nicht abziehen)
+        if get_coins(uname) < amount:
+            await send_chat(f"❌ @{uname} Du brauchst mindestens {amount} Coins für Risk. (wird nicht abgezogen)")
+            return True
+
+        state = _ensure_action_state(uname)
+        state["risk"] = amount
+        await send_chat(f"🎲 @{uname} setzt RISK auf {amount}! Wenn du gewinnst bekommst du +{amount} extra Coins (kein Verlust bei Niederlage).")
+        return True
+
+    # TOP (Coins + Wins)
+    if msg == "!top":
+        data = _load_data()
+        data = _season_reset_if_needed(data)
+        topc = _leaderboard_top(data, "coins", limit=5)
+        topw = _leaderboard_top(data, "wins", limit=5)
+
+        coins_text = " | ".join([f"{i+1}. {name}:{val}" for i, (name, val) in enumerate(topc)]) or "keine Daten"
+        wins_text = " | ".join([f"{i+1}. {name}:{val}" for i, (name, val) in enumerate(topw)]) or "keine Daten"
+
+        await send_chat(f"🏆 TOP Coins: {coins_text}")
+        await send_chat(f"🏁 TOP Wins: {wins_text}")
+        return True
+
+    # SEASON
+    if msg == "!season":
+        data = _load_data()
+        data = _season_reset_if_needed(data)
+        tops = _leaderboard_top(data, "season_points", limit=5)
+        t = " | ".join([f"{i+1}. {name}:{val}" for i, (name, val) in enumerate(tops)]) or "keine Daten"
+        await send_chat(f"🏆 SEASON Top (Points): {t}")
+        return True
+
+    # STATUS / NEXT RACE (optional – falls du willst, dass race_system das auch beantworten kann)
+    if msg == "!status":
+        await send_chat(f"🏁 Rennstatus: running={race_running} | join_open={race_join_open} | players={len(players)}")
+        return True
+
+    if msg == "!nextrennen":
+        remaining = int(_next_race_ts - time.time())
+        await send_chat(f"⏳ Nächstes Rennen in {_format_time(remaining)}.")
+        return True
+
+    return False
+
+# ==========================================
+# AUTO REMINDER + AUTO LOOP
+# ==========================================
+
+async def _feature_reminder_loop(send_chat):
+    while True:
+        await asyncio.sleep(240)  # alle 4 Minuten
+        # nicht mitten im Rennen spammen
+        if not race_running:
+            await send_chat(FEATURE_REMINDER_TEXT)
+
+async def auto_race_loop(send_chat):
+    """
+    Autostart-Loop, der:
+    - Feature Reminder startet (einmal)
+    - alle AUTO_RACE_INTERVAL Sekunden ein Rennen startet
+    - vorher Ankündigungen macht
+    """
+    global _next_race_ts, _reminder_task_started
+
+    if not _reminder_task_started:
+        _reminder_task_started = True
+        asyncio.create_task(_feature_reminder_loop(send_chat))
+
+    while True:
+        # Countdown / Planung
+        _next_race_ts = time.time() + AUTO_RACE_INTERVAL
+
+        # Ankündigungen (wenn nicht im Rennen)
+        if not race_running:
+            await send_chat(f"⏳ Nächstes Rennen startet in {_format_time(AUTO_RACE_INTERVAL)}!")
+            # 30s vorher (wenn möglich)
+            if AUTO_RACE_INTERVAL > 30:
+                await asyncio.sleep(AUTO_RACE_INTERVAL - 30)
+                await send_chat("⏳ Noch 30 Sekunden bis zum nächsten Rennen!")
+                await asyncio.sleep(20)
+                await send_chat("⏳ Noch 10 Sekunden!")
+                await asyncio.sleep(10)
+            else:
+                await asyncio.sleep(AUTO_RACE_INTERVAL)
+
+        # Starten
+        if not race_running:
+            await start_race(send_chat)
+
+# ==========================================
+# EVENTS
+# ==========================================
+
+async def _maybe_trigger_event(send_chat):
+    """
+    Zufällige Events – aufgerufen im Rennen.
+    """
+    global _weather, _safetycar_ticks, _last_event_ts
+
+    # nicht zu häufig Events
+    if _now() - _last_event_ts < 8:
+        return
+
+    # Chance pro Tick
+    if random.random() > 0.30:
+        return
+
+    _last_event_ts = _now()
+
+    roll = random.random()
+
+    # Safety Car
+    if roll < 0.20:
+        _safetycar_ticks = random.randint(1, 2)
+        await send_chat("🚨 SAFETY CAR! Alle müssen langsam fahren!")
+        return
+
+    # Wetterwechsel
+    if roll < 0.50:
+        _weather = random.choice(["clear", "rain", "sun", "storm"])
+        if _weather == "clear":
+            await send_chat("🌤 Wetter klar – volle Power!")
+        elif _weather == "rain":
+            await send_chat("🌧 Regen! Die Strecke wird rutschig (Speed -1).")
+        elif _weather == "sun":
+            await send_chat("☀ Sonne! Grip perfekt (Speed +1).")
+        else:
+            await send_chat("🌪 Sturm! Chaos auf der Strecke (Crash-Chance ↑).")
+        return
+
+    # Crash random
+    if roll < 0.75:
+        if players:
+            victim = random.choice(list(players.values()))
+            victim["stunned_ticks"] = max(victim["stunned_ticks"], 1)
+            await send_chat(f"💥 CRASH! {victim['name']} muss kurz aussetzen!")
+        return
+
+    # Turbo-Zone random
+    if players:
+        lucky = random.choice(list(players.values()))
+        lucky["speed"] += 2
+        await send_chat(f"⚡ TURBO-ZONE! {lucky['name']} bekommt +2 Speed!")
+        return
+
+def _weather_modifier():
+    if _weather == "rain":
+        return -1
+    if _weather == "sun":
+        return +1
+    if _weather == "storm":
+        return 0
+    return 0
+
+# ==========================================
+# START RACE
+# ==========================================
+
+async def start_race(send_chat):
+    global race_running, race_join_open, last_winner
+    global _weather, _safetycar_ticks, _per_race_actions
+
+    if race_running:
+        await send_chat("⚠ Rennen läuft bereits.")
+        return
+
+    # Reset race state
+    players.clear()
+    _per_race_actions = {}
+    race_join_open = True
+    race_running = False
+    last_winner = last_winner  # bleibt
+
+    _weather = "clear"
+    _safetycar_ticks = 0
+
+    await send_chat("🏁 Neues Rennen startet!")
+    await send_chat(f"Tippe !g um {JOIN_DURATION}s lang beizutreten! (5 Runden / ~30s pro Runde)")
+
+    # Join Phase
+    await asyncio.sleep(JOIN_DURATION)
+    race_join_open = False
+
+    # KI hinzufügen
+    ai_count = random.randint(2, 4)
+    for _ in range(ai_count):
+        ai = _pick_ai_name()
+        players[ai.lower()] = {
+            "name": ai,
+            "is_ai": True,
+            "lap": 0,
+            "pos": 0,
+            "speed": random.randint(1, 3),
+            "stunned_ticks": 0,
+        }
+
+    # Speed unlock anwenden (Startbonus)
+    for k, p in list(players.items()):
+        # nur echte Spieler bekommen speed unlock
+        if not p["is_ai"]:
+            if has_unlock(p["name"], "speed") and not _ensure_action_state(p["name"])["speed_boost_used"]:
+                p["speed"] += 1
+                _ensure_action_state(p["name"])["speed_boost_used"] = True
+
+    if len(players) == 0:
+        await send_chat("😢 Nicht genug Fahrer.")
+        race_running = False
+        return
+
+    # Start
+    race_running = True
+    await send_chat("🔥 UND LOS GEHT'S!")
+
+    # Run race
+    await _run_race(send_chat)
+
+# ==========================================
+# RACE LOOP (5 laps, ~30s each)
+# ==========================================
+
+async def _run_race(send_chat):
+    global race_running, last_winner, _safetycar_ticks
+
+    # Pre-calc total ticks
+    total_ticks = TOTAL_LAPS * TICKS_PER_LAP
+
+    # Announce unlock hint
+    await send_chat("🎮 In-Race: !boost | !attack NAME | !risk 20  (Coins werden nicht abgezogen)")
+
+    for tick in range(1, total_ticks + 1):
+        if not race_running:
+            await send_chat("🛑 Rennen wurde beendet.")
+            return
+
+        # event chance
+        await _maybe_trigger_event(send_chat)
+
+        # apply safety car
+        safety_active = _safetycar_ticks > 0
+        if safety_active:
+            _safetycar_ticks -= 1
+
+        wmod = _weather_modifier()
+
+        # Update each player
+        for p in players.values():
+            if p["stunned_ticks"] > 0:
+                p["stunned_ticks"] -= 1
+                continue
+
+            base = p["speed"]
+
+            # storm increases random crash
+            if _weather == "storm" and random.random() < 0.05:
+                p["stunned_ticks"] = 1
+                continue
+
+            # safety car forces slow
+            if safety_active:
+                move = 1
+            else:
+                move = max(1, base + wmod + random.randint(0, 2))
+
+            # turbo chance (bigger if turbo unlocked)
+            if (not p["is_ai"]) and has_unlock(p["name"], "turbo") and random.random() < 0.10:
+                move += 2
+                await send_chat(f"⚡ {p['name']} zündet TURBO!")
+
+            p["pos"] += move
+
+            if p["pos"] >= TRACK_LENGTH:
+                p["lap"] += 1
+                p["pos"] = p["pos"] - TRACK_LENGTH
+
+                # Runde announcement
+                if p["lap"] < TOTAL_LAPS:
+                    await send_chat(f"🏎 {p['name']} startet Runde {p['lap']+1}/{TOTAL_LAPS}")
+
+                # Winner check
+                if p["lap"] >= TOTAL_LAPS:
+                    winner = p["name"]
+                    last_winner = winner
+                    race_running = False
+
+                    # Rewards
+                    await send_chat("🏁 Das Rennen ist vorbei!")
+                    await send_chat(f"🏆 Gewinner ist {winner}!")
+
+                    # Coins / stats
+                    add_win(winner)
+                    add_coins(winner, COINS_WIN)
+                    add_season_points(winner, SEASON_POINTS_WIN)
+
+                    # Participation
+                    for px in players.values():
+                        add_race_played(px["name"])
+                        # alle Teilnehmer (inkl KI) bekommen +10 (du kannst KI hier ausnehmen wenn du willst)
+                        add_coins(px["name"], COINS_PARTICIPATE)
+                        add_season_points(px["name"], SEASON_POINTS_PARTICIPATE)
+
+                    # Risk bonus (nur wenn echter User)
+                    st = _per_race_actions.get(winner.lower())
+                    if st and st.get("risk", 0) > 0:
+                        bonus = int(st["risk"])
+                        add_coins(winner, bonus)
+                        await send_chat(f"🎲 RISK klappt! {winner} bekommt +{bonus} Bonus-Coins!")
+
+                    await send_chat(f"💰 {winner}: +{COINS_WIN} Coins (Sieg) | alle: +{COINS_PARTICIPATE} Coins (Teilnahme)")
+                    return
+
+        # Leaderboard update (einmal pro Runde / alle 6 Ticks)
+        if tick % TICKS_PER_LAP == 0:
+            leader = max(players.values(), key=lambda x: (x["lap"], x["pos"]))
+            current_lap = min(TOTAL_LAPS, leader["lap"] + 1)
+            await send_chat(f"👑 Zwischenstand: {leader['name']} führt (Runde {current_lap}/{TOTAL_LAPS})")
+
+        # Wait tick time
+        await asyncio.sleep(TICK_SECONDS)
+
+    # fallback (sollte nie passieren)
+    race_running = False
+    await send_chat("🏁 Rennen beendet (timeout).")
