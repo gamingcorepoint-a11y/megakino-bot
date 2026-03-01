@@ -1,67 +1,51 @@
-🏁 RENN-SYSTEM – ALLE COMMANDS
-👥 USER COMMANDS (für Zuschauer)
-🚗 !g
-Dem aktuellen Rennen beitreten.
-⏳ !nextrennen
-Zeigt an, wann das nächste automatische Rennen startet.
-📊 !status
-Zeigt, ob das Rennsystem aktiv oder pausiert ist.
-🪙 !coins
-Zeigt deine aktuellen Coins.
-⚡ !buy turbo
-Kauft Turbo (30 Coins).
-🚀 !buy speed
-Kauft Geschwindigkeits-Boost (50 Coins).
-🛠 MOD / ADMIN COMMANDS
-(Funktionieren für Mods + Broadcaster)
-🟢 !start
-Aktiviert das komplette Rennsystem.
-🔴 !stop
-Deaktiviert das Rennsystem komplett.
-Kein Join möglich, kein Autostart.
-🚀 !startrace
-Startet sofort ein Rennen.
-🛑 !stoprace
-Stoppt das aktuelle Rennen.
-♻ !clearrace
-Setzt das Rennen zurück (Spieler werden gelöscht).
-⏱ !setinterval <sekunden>
-Setzt das Auto-Start-Intervall neu.
-Beispiel:
-Code kopieren
+🏁 ==============================
+      MEGAKINO RACE SYSTEM
+==============================
 
-!setinterval 120
-🏆 !winner
-Zeigt den letzten Gewinner an.
-🗣 !say <text>
-Lässt den Bot eine Nachricht schreiben.
-Beispiel:
-Code kopieren
+👥 GRUNDLEGEND (für alle)
+!g                 → Dem nächsten Rennen beitreten
+!status            → Zeigt Systemstatus (Aktiv / Pause / Wartung)
+!nextrennen        → Countdown bis zum nächsten Rennen
+!help              → Zeigt Command-Übersicht
+!winner            → Letzten Gewinner anzeigen
 
-!say Willkommen im Stream!
-🐛 !debug
-Zeigt Systemstatus:
-Rennsystem an/aus
-Rennen läuft
-Join offen
-Anzahl Spieler
-💡 OPTIONAL (wenn du willst)
-Wenn du möchtest, kann ich dir noch einen Command machen:
-Code kopieren
+🪙 COINS & SHOP
+!coins             → Eigene Coins anzeigen
+!buy turbo         → Turbo freischalten
+!buy speed         → Extra Start-Speed freischalten
 
-!commands
-Der dann im Chat automatisch diese Übersicht in Kurzform postet.
-📋 FERTIGER TEXT FÜR DEIN PANEL
-Wenn du es kompakt für Twitch reinpacken willst:
-Code kopieren
+⚡ WÄHREND DES RENNENS
+!boost             → +2 Speed einmalig (wenn gekauft)
+!attack NAME       → Sabotiert Gegner
+!risk <Betrag>     → Setzt Risiko für Extra-Coins
 
-🏁 Autorennen:
-!g = Join
-!coins = Coins anzeigen
-!buy turbo (30)
-!buy speed (50)
-!nextrennen = Countdown
-!status = Systemstatus
+📊 RANKING & STATISTIK
+!top               → Top 5 Coins & Siege
+!season            → Saison-Ranking anzeigen
 
-Mods:
-!start !stop !startrace !stoprace !clearrace !setinterval X !winner !debug
+⚙️ SYSTEMSTEUERUNG (Mods / Streamer)
+
+!start             → Rennsystem aktivieren
+!stop              → Rennsystem pausieren
+!startrace         → Rennen sofort starten
+!stoprace          → Aktuelles Rennen stoppen
+!clearrace         → Rennen komplett zurücksetzen
+!setinterval <s>   → Autostart-Intervall ändern
+!say <Text>        → Bot schreibt Nachricht
+!debug             → System-Status anzeigen
+
+🛠 WARTUNG & RELOAD (Mods / Streamer)
+
+!wartung           → Wartungsmodus aktivieren
+!wartungoff        → Wartungsmodus deaktivieren
+!reload            → Rennsystem neu laden (ohne Bot-Neustart)
+
+==============================
+🏎 5 Runden à 30 Sekunden
+🌪 Zufällige Events
+💥 Crash / Safety Car / Wetter
+💰 Coin- & Risk-System
+⚡ Boost & Attack Mechanik
+🏆 Season & Ranking
+🛠 Wartungsmodus integriert
+==============================
