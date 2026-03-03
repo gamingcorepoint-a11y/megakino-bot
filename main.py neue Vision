@@ -9,14 +9,18 @@ import systems.race_system.race_system as race_system
 # ======================================
 # GLOBAL STATE
 # ======================================
+
 race_system_enabled = True
 maintenance_mode = False
 race_task = None
+
+DISCORD_LINK = "https://discord.gg/DEINLINK"
 
 
 # ======================================
 # PARSER
 # ======================================
+
 def parse_message(raw_line):
     match = re.search(r":([^!]+)!.* PRIVMSG #[^ ]+ :(.*)", raw_line)
     if not match:
@@ -25,8 +29,9 @@ def parse_message(raw_line):
 
 
 # ======================================
-# ADMIN CHECK (MODS + BROADCASTER)
+# ADMIN CHECK
 # ======================================
+
 def is_admin(raw_line, user):
     rl = raw_line.lower()
     ul = user.lower()
@@ -49,6 +54,7 @@ def is_admin(raw_line, user):
 # ======================================
 # LOOP CONTROL
 # ======================================
+
 def start_race_loop(client):
     global race_task
     if race_task is None or race_task.done():
@@ -61,7 +67,6 @@ def stop_race_loop():
     global race_task
     if race_task and not race_task.done():
         race_task.cancel()
-    race_task = None
 
 
 def hard_stop_race_state():
@@ -74,8 +79,24 @@ def hard_stop_race_state():
 
 
 # ======================================
+# AUTO DISCORD PROMO
+# ======================================
+
+async def auto_discord_promo(send_chat):
+    while True:
+        await asyncio.sleep(120)  # 2 Minuten
+
+        if race_system_enabled and not maintenance_mode:
+            await send_chat(
+                f"🔔 Werde Teil der RaceControl Arena!\n"
+                f"🏁 Discord: {https://discord.gg/ZyHG5ad5}"
+            )
+
+
+# ======================================
 # MESSAGE HANDLER
 # ======================================
+
 async def handle_message(raw_line, client):
     global race_system_enabled, maintenance_mode
 
@@ -90,6 +111,7 @@ async def handle_message(raw_line, client):
     # ===============================
     # STATUS
     # ===============================
+
     if msg == "!status":
         if maintenance_mode:
             await client.send("🛠 System im Wartungsmodus.")
@@ -101,6 +123,7 @@ async def handle_message(raw_line, client):
     # ===============================
     # WARTUNG
     # ===============================
+
     if msg == "!wartung":
         if not admin:
             await client.send("❌ Keine Rechte.")
@@ -120,6 +143,7 @@ async def handle_message(raw_line, client):
         maintenance_mode = False
         if race_system_enabled:
             start_race_loop(client)
+
         await client.send("🟢 Wartungsmodus deaktiviert.")
         return
 
@@ -140,6 +164,7 @@ async def handle_message(raw_line, client):
     # ===============================
     # BLOCK BEI WARTUNG
     # ===============================
+
     if maintenance_mode:
         if msg.startswith("!"):
             await client.send("🛠 System im Wartungsmodus.")
@@ -148,6 +173,7 @@ async def handle_message(raw_line, client):
     # ===============================
     # START / STOP
     # ===============================
+
     if msg == "!stop":
         if not admin:
             await client.send("❌ Keine Rechte.")
@@ -177,13 +203,15 @@ async def handle_message(raw_line, client):
     # ===============================
     # JOIN
     # ===============================
+
     if msg == "!g":
         await race_system.join_race(user, client.send)
         return
 
     # ===============================
-    # GAME COMMANDS
+    # SHOP
     # ===============================
+
     if hasattr(race_system, "handle_shop"):
         handled = await race_system.handle_shop(user, msg_raw, client.send)
         if handled:
@@ -192,6 +220,7 @@ async def handle_message(raw_line, client):
     # ===============================
     # ADMIN EXTRA
     # ===============================
+
     if not admin:
         return
 
@@ -242,6 +271,7 @@ async def handle_message(raw_line, client):
 # ======================================
 # MAIN
 # ======================================
+
 async def main():
     client = IRCClient()
     await client.connect()
@@ -250,6 +280,8 @@ async def main():
 
     if race_system_enabled and not maintenance_mode:
         start_race_loop(client)
+
+    asyncio.create_task(auto_discord_promo(client.send))
 
     await client.listen(lambda line: handle_message(line, client))
 
